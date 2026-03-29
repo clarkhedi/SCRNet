@@ -29,7 +29,6 @@ class EfficientConceptRouter(nn.Module):
         # SVD参数初始化
         self.reset_parameters()
 
-        # 注意力参数 (轻量级)
         self.attn_transform = nn.Linear(self.reduced_dim, 3, bias=False)  # 生成注意力权重
 
         # 门控融合器
@@ -40,11 +39,9 @@ class EfficientConceptRouter(nn.Module):
             nn.Softmax(dim=1)
         )
 
-        # 增强块
         self.enhance_layer = self._create_enhance_block()  # 仅1层迭代
 
-        # 最终投影
-        self.output_proj = nn.Linear(self.reduced_dim, embed_dim)
+        self.output_proj = nn.Linear(self.reduced_dim, embed_dim) # 投影
 
     def reset_parameters(self):
         """
@@ -113,20 +110,16 @@ class EfficientConceptRouter(nn.Module):
 
     def forward(self, img_feat, np_feat, word_feat,
                 np_key_padding_mask=None, word_key_padding_mask=None):
-        # 1. 带掩码的低维投影（低秩）
         img_proj = self._svd_shared_proj(img_feat.mean(1))   # [B, reduced_dim]
         np_proj = self._masked_proj(np_feat, np_key_padding_mask)    # [B, reduced_dim]
         word_proj = self._masked_proj(word_feat, word_key_padding_mask) # [B, reduced_dim]
 
-        # 2. 跨模态交互
         all_features = torch.stack([img_proj, np_proj, word_proj], dim=1)  # [B, 3, reduced_dim]
         attn_map = self.attn_transform(all_features).softmax(dim=-1)  # [B, 3, 3]
 
-        # 3. 增强特征: 融合三种特征
         enhanced_features = torch.matmul(attn_map, all_features)  # [B, 3, reduced_dim]
         img_enhanced, np_enhanced, word_enhanced = torch.unbind(enhanced_features, dim=1)
 
-        # 4. 门控动态融合
         features_concat = torch.cat([img_enhanced, np_enhanced, word_enhanced], dim=-1)  # [B, reduced_dim*3]
         weights = self.gate(features_concat)  # [B, 3]
 
@@ -137,7 +130,6 @@ class EfficientConceptRouter(nn.Module):
             weights[:, 2].unsqueeze(1) * word_enhanced
         )  # [B, reduced_dim]
 
-        # 5. 增强与输出
         routed = fused_feature + self.enhance_layer(fused_feature)  # 残差连接
         return self.output_proj(routed)
 
@@ -172,13 +164,9 @@ class ConceptExpertSystem(nn.Module):
         text_feat: [B, D] 全局文本特征
         返回: [B, num_concepts] 概念权重
         """
-        # 融合特征
         fused_feat = torch.cat([img_feat, text_feat], dim=1)
-
-        # 门控权重
         gate_weights = self.gate_network(fused_feat)  # [B, num_experts]
 
-        # 专家预测
         expert_outputs = torch.stack([expert(fused_feat) for expert in self.experts], dim=1)  # [B, num_experts, C]
 
         # 加权组合
@@ -194,7 +182,7 @@ class EnhancedConceptMatcher(nn.Module):
     def __init__(self, embed_dim, concept_dim, num_concepts):
         super().__init__()
         self.num_concepts = num_concepts
-        # 专家概念权重系统
+
         self.expert_system = ConceptExpertSystem(embed_dim, num_concepts)
 
         # 概念匹配分类器
@@ -211,15 +199,12 @@ class EnhancedConceptMatcher(nn.Module):
 
     def forward(self, img_feat, text_feat, concepts_pos, concepts_neg,
                concept_pos_atts, concept_neg_atts, itm_labels):
-        # 生成专家权重
-        concept_weights = self.expert_system(img_feat, text_feat)
+        concept_weights = self.expert_system(img_feat, text_feat) # 生成专家权重
 
-        # 计算概念匹配损失
         loss_cm = 0.
         valid_concepts = 0
 
         for i in range(self.num_concepts):
-            # 拼接正负概念样本
             cm_embeddings = torch.cat([concepts_pos[:, i], concepts_neg[:, i]], dim=0)
             cm_concept_atts = torch.cat([concept_pos_atts[:, i], concept_neg_atts[:, i]], dim=0)
 
@@ -228,7 +213,6 @@ class EnhancedConceptMatcher(nn.Module):
             if not valid_mask.any():
                 continue
 
-            # 使用专用分类头
             cm_output = self.itm_heads[i](cm_embeddings)
 
             # 计算当前概念损失
@@ -244,7 +228,6 @@ class EnhancedConceptMatcher(nn.Module):
             loss_cm += (concept_loss * batch_weights).mean()
             valid_concepts += 1
 
-        # 计算平均损失
         if valid_concepts > 0:
             loss_cm = loss_cm / valid_concepts
 
