@@ -1,6 +1,6 @@
 # SCL for Text-to-Image Person Retrieval
 
-![main](doc/scl.png)
+![main](doc/scrnet.png)
 
 
 
