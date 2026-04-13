@@ -1,9 +1,3 @@
-# Expert-Guided Cross-Modal Semantic Consensus Learning for Text-to-Image Person Re-identification
-
-![main](doc/scrnet.png)
-
-
-
 ### Getting started
 
 Install dependencies
